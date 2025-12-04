@@ -14,10 +14,6 @@ export default function AddToCartButton({ productId }: { productId: string }) {
       let currentCart = cart;
       let currentCartId = cartId;
 
-      if (!currentCart || !currentCartId) {
-        throw new Error("Cart or cartId missing before add-to-cart.");
-      }
-
       // 1️⃣ Create a new cart if it doesn't exist
       if (!currentCartId) {
         const res = await fetch("/api/cart", {
