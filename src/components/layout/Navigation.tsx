@@ -2,135 +2,153 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { getCategories } from '@/lib/commercetools/categories';
 import type { Category } from '@commercetools/platform-sdk';
 
 export default function Navigation({ isMenuOpen }: { isMenuOpen: boolean }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [openMobile, setOpenMobile] = useState<string | null>(null);
 
-useEffect(() => {
-  async function fetchCategories() {
-    try {
-      const response = await fetch("/api/categories", { method: "GET" });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+  useEffect(() => {
+    async function fetchCategories() {
+      try {
+        const response = await fetch('/api/categories');
+        const cats: Category[] = await response.json();
+        setCategories(cats);
+      } catch (error) {
+        console.error('Failed to load categories:', error);
       }
-      const cats: Category[] = await response.json();
-      setCategories(cats);
-    } catch (error) {
-      console.error("Failed to load categories:", error);
     }
-  }
 
-  fetchCategories();
-}, []);
+    fetchCategories();
+  }, []);
 
+  // Helper: get localized value
+  const getLocalized = (val: any) =>
+    val?.en || val?.[Object.keys(val ?? {})[0]];
 
-  const mainCategories = [
-    { name: 'Home', href: '/', icon: '🏠' },
-    { name: 'All Products', href: '/products', icon: '🛍️' },
-    { name: 'New Arrivals', href: '/products?sort=createdAt desc', icon: '✨' },
-    { name: 'Best Sellers', href: '/products?sort=sales desc', icon: '🔥' },
-    { name: 'Sale', href: '/products?filter=onSale', icon: '💰' },
-  ];
+  // Build category tree
+  const buildTree = (cats: Category[]) => {
+    const map = new Map<string, any>();
+    const roots: any[] = [];
+
+    cats.forEach((cat) => map.set(cat.id, { ...cat, children: [] }));
+
+    cats.forEach((cat) => {
+      if (cat.parent) {
+        const parent = map.get(cat.parent.id);
+        if (parent) parent.children.push(map.get(cat.id));
+      } else {
+        roots.push(map.get(cat.id));
+      }
+    });
+
+    return roots;
+  };
+
+  const categoryTree = buildTree(categories);
 
   return (
     <nav>
-      {/* Desktop Navigation */}
+      {/* Desktop */}
       <ul className="hidden md:flex space-x-6 items-center">
-        {mainCategories.map((item) => (
-          <li key={item.name}>
-            <Link href={item.href} className="flex items-center space-x-1 hover:text-blue-600">
-              <span>{item.icon}</span>
-              <span>{item.name}</span>
-            </Link>
-          </li>
-        ))}
+        {categoryTree.map((cat) => {
+          const name = getLocalized(cat.name);
+          const slug = getLocalized(cat.slug);
 
-        {/* Categories Dropdown */}
-        {categories.length > 0 && (
-          <li
-            className="relative"
-            onMouseEnter={() => setOpenDropdown('categories')}
-            onMouseLeave={() => setOpenDropdown(null)}
-          >
-            <button className="flex items-center space-x-1 hover:text-blue-600">
-              <span>📂</span>
-              <span>Categories</span>
-            </button>
-            {openDropdown === 'categories' && (
-              <ul className="absolute top-full left-0 mt-2 w-48 bg-white border shadow-lg rounded z-50">
-                {categories.slice(0, 8).map((category) => {
-                  const categoryName =
-                    category.name.en || category.name[Object.keys(category.name)[0]];
-                  const categorySlug =
-                    category.slug?.en || category.slug?.[Object.keys(category.slug!)[0]];
+          return (
+            <li
+              key={cat.id}
+              className="relative group"
+              onMouseEnter={() => setOpenDropdown(cat.id)}
+              onMouseLeave={() => setOpenDropdown(null)}
+            >
+              <Link
+                href={`/categories/${slug}`}
+                className="flex items-center px-3 py-1 hover:text-blue-600"
+              >
+                {name}
+              </Link>
 
-                  return (
-                    <li key={category.id}>
-                      <Link
-                        href={`/categories/${categorySlug}`}
-                        className="block px-4 py-2 hover:bg-gray-100"
-                      >
-                        {categoryName}
-                      </Link>
-                    </li>
-                  );
-                })}
-                <li>
-                  <Link
-                    href="/categories"
-                    className="block px-4 py-2 font-semibold hover:bg-gray-100"
-                  >
-                    View All Categories →
-                  </Link>
-                </li>
-              </ul>
-            )}
-          </li>
-        )}
+              {/* Submenu */}
+              {cat.children.length > 0 && (
+                <ul
+                  className={`absolute top-full left-0 mt-2 w-48 bg-white border shadow-lg rounded z-50
+                    ${openDropdown === cat.id ? 'block' : 'hidden'}
+                  `}
+                >
+                  {cat.children.map((child: any) => {
+                    const childName = getLocalized(child.name);
+                    const childSlug = getLocalized(child.slug);
+                    return (
+                      <li key={child.id}>
+                        <Link
+                          href={`/categories/${childSlug}`}
+                          className="block px-4 py-2 hover:bg-gray-100"
+                        >
+                          {childName}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
-      {/* Mobile Navigation */}
+      {/* Mobile */}
       {isMenuOpen && (
         <ul className="md:hidden space-y-3 px-4 py-4 border-t">
-          {mainCategories.map((item) => (
-            <li key={item.name}>
-              <Link href={item.href} className="flex items-center space-x-2">
-                <span>{item.icon}</span>
-                <span>{item.name}</span>
-              </Link>
-            </li>
-          ))}
+          {categoryTree.map((cat) => {
+            const name = getLocalized(cat.name);
+            const slug = getLocalized(cat.slug);
 
-          {/* Categories Mobile */}
-          {categories.length > 0 && (
-            <li>
-              <span className="block font-semibold mb-2">📂 Categories</span>
-              <ul className="pl-4 space-y-1">
-                {categories.slice(0, 8).map((category) => {
-                  const categoryName =
-                    category.name.en || category.name[Object.keys(category.name)[0]];
-                  const categorySlug =
-                    category.slug?.en || category.slug?.[Object.keys(category.slug!)[0]];
+            const isOpen = openMobile === cat.id;
 
-                  return (
-                    <li key={category.id}>
-                      <Link href={`/category/${categorySlug}`} className="block">
-                        {categoryName}
-                      </Link>
-                    </li>
-                  );
-                })}
-                <li>
-                  <Link href="/categories" className="block font-semibold mt-1">
-                    View All Categories →
+            return (
+              <li key={cat.id}>
+                <div className="flex justify-between items-center">
+                  <Link
+                    href={`/categories/${slug}`}
+                    className="font-medium py-1"
+                  >
+                    {name}
                   </Link>
-                </li>
-              </ul>
-            </li>
-          )}
+                  {cat.children.length > 0 && (
+                    <button
+                      onClick={() =>
+                        setOpenMobile(isOpen ? null : cat.id)
+                      }
+                      className="text-gray-500 px-2"
+                    >
+                      {isOpen ? '▲' : '▼'}
+                    </button>
+                  )}
+                </div>
+
+                {isOpen && cat.children.length > 0 && (
+                  <ul className="pl-4 mt-1 space-y-1">
+                    {cat.children.map((child: any) => {
+                      const childName = getLocalized(child.name);
+                      const childSlug = getLocalized(child.slug);
+                      return (
+                        <li key={child.id}>
+                          <Link
+                            href={`/categories/${childSlug}`}
+                            className="block py-1"
+                          >
+                            {childName}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </nav>
