@@ -11,7 +11,7 @@ export interface Product {
   masterVariant: {
     id: number;
     sku?: string;
-    images: Array;
-    prices: Array;
+    images: Array<any>;
+    prices: Array<any>;
   };
 }
