@@ -1,0 +1,36 @@
+{
+  "name": "nextjs-commercetools",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@commercetools/platform-sdk": "^8.18.0",
+    "@commercetools/sdk-client-v2": "^3.0.0",
+    "@commercetools/sdk-middleware-http": "^8.0.1",
+    "@livekit/components-react": "^2.9.16",
+    "@livekit/components-styles": "^1.2.0",
+    "axios": "^1.13.2",
+    "livekit-client": "^2.16.0",
+    "livekit-server-sdk": "^2.14.2",
+    "next": "16.0.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "swr": "^2.3.7",
+    "zustand": "^5.0.9"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20.19.25",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
