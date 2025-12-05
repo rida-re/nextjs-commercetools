@@ -19,15 +19,12 @@ export default function Navigation({ isMenuOpen }: { isMenuOpen: boolean }) {
         console.error('Failed to load categories:', error);
       }
     }
-
     fetchCategories();
   }, []);
 
-  // Helper: get localized value
   const getLocalized = (val: any) =>
     val?.en || val?.[Object.keys(val ?? {})[0]];
 
-  // Build category tree
   const buildTree = (cats: Category[]) => {
     const map = new Map<string, any>();
     const roots: any[] = [];
@@ -59,40 +56,44 @@ export default function Navigation({ isMenuOpen }: { isMenuOpen: boolean }) {
           return (
             <li
               key={cat.id}
-              className="relative group"
-              onMouseEnter={() => setOpenDropdown(cat.id)}
-              onMouseLeave={() => setOpenDropdown(null)}
+              className="relative"
             >
-              <Link
-                href={`/categories/${slug}`}
-                className="flex items-center px-3 py-1 hover:text-blue-600"
+              {/* WRAPPER QUI FIXE LE PROBLÈME */}
+              <div
+                onMouseEnter={() => setOpenDropdown(cat.id)}
+                onMouseLeave={() => setOpenDropdown(null)}
               >
-                {name}
-              </Link>
-
-              {/* Submenu */}
-              {cat.children.length > 0 && (
-                <ul
-                  className={`absolute top-full left-0 mt-2 w-48 bg-white border shadow-lg rounded z-50
-                    ${openDropdown === cat.id ? 'block' : 'hidden'}
-                  `}
+                <Link
+                  href={`/categories/${slug}`}
+                  className="flex items-center px-3 py-1 hover:text-blue-600"
                 >
-                  {cat.children.map((child: any) => {
-                    const childName = getLocalized(child.name);
-                    const childSlug = getLocalized(child.slug);
-                    return (
-                      <li key={child.id}>
-                        <Link
-                          href={`/categories/${childSlug}`}
-                          className="block px-4 py-2 hover:bg-gray-100"
-                        >
-                          {childName}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+                  {name}
+                </Link>
+
+                {cat.children.length > 0 && (
+                  <ul
+                    className={`
+                      absolute top-full left-0 mt-1 w-48 bg-white border shadow-lg rounded z-50
+                      ${openDropdown === cat.id ? 'block' : 'hidden'}
+                    `}
+                  >
+                    {cat.children.map((child: any) => {
+                      const childName = getLocalized(child.name);
+                      const childSlug = getLocalized(child.slug);
+                      return (
+                        <li key={child.id}>
+                          <Link
+                            href={`/categories/${childSlug}`}
+                            className="block px-4 py-2 hover:bg-gray-100"
+                          >
+                            {childName}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             </li>
           );
         })}
@@ -116,11 +117,10 @@ export default function Navigation({ isMenuOpen }: { isMenuOpen: boolean }) {
                   >
                     {name}
                   </Link>
+
                   {cat.children.length > 0 && (
                     <button
-                      onClick={() =>
-                        setOpenMobile(isOpen ? null : cat.id)
-                      }
+                      onClick={() => setOpenMobile(isOpen ? null : cat.id)}
                       className="text-gray-500 px-2"
                     >
                       {isOpen ? '▲' : '▼'}

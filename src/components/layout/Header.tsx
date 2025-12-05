@@ -20,7 +20,7 @@ export default function Header() {
       : 0;
 
   return (
-    <header className="w-full border-b">
+    <header className="w-full border-b relative z-50">
       {/* Top Bar */}
       <div className="bg-gray-100 text-sm flex justify-between items-center px-4 py-2">
         <span>🎉 Free shipping on orders over $50</span>
