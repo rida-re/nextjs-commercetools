@@ -2,22 +2,15 @@
 import { NextResponse } from "next/server";
 import { apiRoot } from "@/lib/commercetools/client";
 
-export async function GET(params?: {
-  limit?: number;
-  offset?: number;
-  filter?: string[];
-  sort?: string[];
-}) {
+export async function GET() {
   try {
    const response = await apiRoot
       .productProjections()
       .search()
       .get({
         queryArgs: {
-          limit: params?.limit || 20,
-          offset: params?.offset || 0,
-          filter: params?.filter,
-          sort: params?.sort,
+          limit: 20,
+          offset: 0,
         },
       })
       .execute();

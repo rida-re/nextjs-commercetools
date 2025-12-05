@@ -134,8 +134,8 @@ export default function VoiceAssistant() {
 
   // Enhanced fuzzy matching with phonetic similarity
   const calculateSimilarity = (str1: string, str2: string): number => {
-    const s1 = str1.toLowerCase().trim();
-    const s2 = str2.toLowerCase().trim();
+  const s1 = String(str1 || '').toLowerCase().trim();
+  const s2 = String(str2 || '').toLowerCase().trim();
     
     // Exact match
     if (s1 === s2) return 1.0;
