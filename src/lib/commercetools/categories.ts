@@ -12,25 +12,23 @@ export async function getCategories() {
 
 export async function getCategoryBySlug(slug: string, locale: string = "en-GB") {
   try {
+    console.log("Fetching category by slug:", slug);
+
     const response = await apiRoot
       .categories()
       .get({
         queryArgs: {
-          // MUST use filter.query for exact slug match
-          "filter.query": [`slug.${locale}:"${slug}"`],
-
-          // ensure language projection matches your data
-          localeProjection: [locale],
-
+          where: `slug(${locale}="${slug}")`,
           limit: 1,
-          staged: false,
         },
       })
       .execute();
 
+    console.log("Category result:", response.body.results);
+
     return response.body.results[0] || null;
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Error fetching category: ${errorMessage}`);
   }
 }
