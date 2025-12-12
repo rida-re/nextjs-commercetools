@@ -154,12 +154,7 @@ export default function VapiAssistant() {
       return;
     }
 
-    let vapi: VapiInstance;
-    try {
-      vapi = new Vapi(PUBLIC_KEY);
-    } catch {
-      vapi = new Vapi({ apiKey: PUBLIC_KEY });
-    }
+    let vapi: VapiInstance = new Vapi(PUBLIC_KEY);
 
     vapiRef.current = vapi;
 
@@ -167,10 +162,10 @@ export default function VapiAssistant() {
     vapi.on?.("call-end", () => { setIsListening(false); setStatus("Call ended"); });
     vapi.on?.("speech-start", () => { setStatus("User speaking..."); });
     vapi.on?.("speech-end", () => { setStatus("Processing..."); });
-    vapi.on?.("error", (err) => { console.error(err); setStatus("Error occurred"); });
+    vapi.on?.("error", (err : any) => { console.error(err); setStatus("Error occurred"); });
 
     vapi.on?.("function-call", handleFunctionCall);
-    vapi.on?.("message", (msg) => { console.log("📨 [vapi] message received", msg); });
+    vapi.on?.("message", (msg : any) => { console.log("📨 [vapi] message received", msg); });
 
     return () => {
       try { vapi.destroy?.(); } catch (e) { console.warn(e); }
