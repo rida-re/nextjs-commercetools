@@ -191,6 +191,13 @@ export default function VapiAssistant() {
       console.log("📨 Vapi message:", msg);
     });
 
+    vapi.on("status-update", (msg: any) => {
+        if(msg.status === "ended" && msg.endedReason === "silence-timed-out") {
+            console.log("⏱ Restarting assistant after silence timeout...");
+            startAssistant();
+        }
+    });
+
     console.log("✅ Vapi initialized");
 
     return () => {
