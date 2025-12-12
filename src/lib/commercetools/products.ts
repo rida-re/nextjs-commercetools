@@ -57,28 +57,21 @@ export async function getProductBySlug(
   }
 }
 
-export async function searchProducts(
-  searchTerm: string,
-  locale: string = "en",
-  fuzzy: boolean = true
-) {
+export async function searchProducts(searchTerm: string, locale = "en") {
   try {
     const response = await apiRoot
       .productProjections()
       .search()
       .get({
         queryArgs: {
-          [`text.${locale}`]: searchTerm,   // must include locale
-          fuzzy: fuzzy,                     // enable fuzzy search
-          markMatchingVariants: true,       // useful for PLP
+          fuzzy: true,
+          [`name.${locale}`]: `${searchTerm}*`,
           limit: 20,
-          localeProjection: [locale],       // ensure correct localized fields
-          staged: false,
         },
       })
       .execute();
 
-    return response.body;
+    return response.body.results;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Error searching products: ${errorMessage}`);
