@@ -55,7 +55,7 @@ export default function VapiAssistant() {
           navigationSuccess = navigateTo("/cart");
           result = { 
             success: navigationSuccess, 
-            output: navigationSuccess 
+            message: navigationSuccess 
               ? "Successfully navigated to cart page" 
               : "Failed to navigate to cart"
           };
@@ -66,7 +66,7 @@ export default function VapiAssistant() {
           navigationSuccess = navigateTo("/");
           result = { 
             success: navigationSuccess, 
-            output: navigationSuccess
+            message: navigationSuccess
               ? "Successfully navigated to home page" 
               : "Failed to navigate to home"
           };
@@ -80,7 +80,7 @@ export default function VapiAssistant() {
           navigationSuccess = navigateTo(productUrl);
           result = { 
             success: navigationSuccess, 
-            output: navigationSuccess
+            message: navigationSuccess
               ? (category 
                   ? `Showing products in category: ${category}` 
                   : "Showing all products")
@@ -93,13 +93,13 @@ export default function VapiAssistant() {
           if (!query) {
             result = { 
               success: false, 
-              output: "Search query is required" 
+              message: "Search query is required" 
             };
           } else {
             navigationSuccess = navigateTo(`/search?q=${encodeURIComponent(query)}`);
             result = { 
               success: navigationSuccess, 
-              output: navigationSuccess
+              message: navigationSuccess
                 ? `Searching for: ${query}`
                 : "Failed to search products"
             };
@@ -110,14 +110,14 @@ export default function VapiAssistant() {
           console.warn("⚠️ Unknown function:", functionName);
           result = { 
             success: false, 
-            output: `Unknown function: ${functionName}` 
+            message: `Unknown function: ${functionName}` 
           };
       }
     } catch (error) {
       console.error("❌ Error executing function:", error);
       result = { 
         success: false, 
-        output: `Error: ${error}` 
+        message: `Error: ${error}` 
       };
     }
 
@@ -184,11 +184,18 @@ export default function VapiAssistant() {
       setStatus("Error occurred");
     });
 
-    // Listen for tool calls
-    vapi.on("tool-calls", handleFunctionCall);
-
+    // FIXED: Handle tool calls from message event
     vapi.on("message", (msg: any) => {
       console.log("📨 Vapi message:", msg);
+      
+      // Check if this message contains tool calls
+      if (msg.type === "tool-calls" && msg.toolCalls) {
+        console.log("🎯 Tool calls detected in message!");
+        // Process each tool call
+        msg.toolCalls.forEach((toolCall: any) => {
+          handleFunctionCall(toolCall);
+        });
+      }
     });
 
     vapi.on("status-update", (msg: any) => {
@@ -229,12 +236,28 @@ export default function VapiAssistant() {
         model: {
           provider: "openai",
           model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a helpful shopping assistant. Your job is to help users navigate an e-commerce website.
+
+IMPORTANT: You MUST use the provided functions to help users navigate. When a user asks to:
+- Go to cart, view cart, or check their cart → use navigate_to_cart()
+- Go home, go to homepage, or return to main page → use navigate_to_home()
+- See products, browse items, or view a category → use show_products() with optional category parameter
+- Search for something, find a product → use search_products() with the search query
+
+Always use these functions when appropriate. After calling a function, confirm to the user what action was taken.
+
+Be conversational and friendly. Ask clarifying questions if needed.`
+            }
+          ],
           tools: [
             {
               type: "function",
               function: {
                 name: "navigate_to_cart",
-                description: "Navigate to the shopping cart page when user asks to go to cart, view cart, or check cart",
+                description: "Navigate to the shopping cart page",
                 parameters: {
                   type: "object",
                   properties: {},
@@ -245,7 +268,7 @@ export default function VapiAssistant() {
               type: "function",
               function: {
                 name: "navigate_to_home",
-                description: "Navigate to the home page when user asks to go home, go to homepage, or return to main page",
+                description: "Navigate to the home page",
                 parameters: {
                   type: "object",
                   properties: {},
@@ -256,7 +279,7 @@ export default function VapiAssistant() {
               type: "function",
               function: {
                 name: "show_products",
-                description: "Show products page, optionally filtered by category when user asks to see products, browse items, or view specific category",
+                description: "Show products page, optionally filtered by category",
                 parameters: {
                   type: "object",
                   properties: {
@@ -272,7 +295,7 @@ export default function VapiAssistant() {
               type: "function",
               function: {
                 name: "search_products",
-                description: "Search for specific products by keyword when user asks to find or search for something",
+                description: "Search for specific products by keyword",
                 parameters: {
                   type: "object",
                   properties: {
@@ -291,7 +314,7 @@ export default function VapiAssistant() {
           provider: "openai",
           voiceId: "alloy",
         },
-        firstMessage: "Hello! I'm your shopping assistant. You can ask me to go home, go to cart, show products, or search for products. Use the tool functions provided to navigate.",
+        firstMessage: "Hi! I'm your shopping assistant. How can I help you today? You can ask me to go to your cart, browse products, or search for something specific.",
       });
       console.log("✅ Assistant started successfully");
       setStatus("Listening...");
