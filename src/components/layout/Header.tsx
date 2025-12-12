@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { useRouter } from "next/navigation";
 import { useCartStore } from '@/store/cartStore';
 import Navigation from './Navigation';
 
@@ -9,6 +10,9 @@ export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { cart } = useCartStore();
   const [mounted, setMounted] = useState(false);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const router = useRouter();
 
   useEffect(() => {
     setMounted(true);
@@ -18,6 +22,11 @@ export default function Header() {
     mounted && cart
       ? cart.lineItems.reduce((sum, item) => sum + item.quantity, 0)
       : 0;
+
+  const handleSearch = () => {
+    if (!searchTerm.trim()) return;
+    router.push(`/search?q=${encodeURIComponent(searchTerm)}`);
+  };
 
   return (
     <header className="w-full border-b relative z-50">
@@ -44,15 +53,15 @@ export default function Header() {
             type="text"
             placeholder="Search products..."
             className="w-full border rounded px-3 py-2 focus:outline-none"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
         </div>
 
         {/* Actions */}
         <div className="flex items-center space-x-4">
-          {/* User Account */}
           <Link href="/account">Account</Link>
-
-          {/* Wishlist */}
           <Link href="/wishlist">Wishlist</Link>
 
           {/* Cart */}
@@ -77,12 +86,21 @@ export default function Header() {
 
       {/* Search Bar - Mobile */}
       {isMenuOpen && (
-        <div className="md:hidden px-4 pb-4">
+        <div className="md:hidden px-4 pb-4 flex gap-2">
           <input
             type="text"
             placeholder="Search products..."
             className="w-full border rounded px-3 py-2 focus:outline-none"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
+          <button
+            onClick={handleSearch}
+            className="px-3 py-2 border rounded bg-gray-200"
+          >
+            Go
+          </button>
         </div>
       )}
 
