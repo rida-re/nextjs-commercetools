@@ -4,6 +4,7 @@ import "./globals.css";
 import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import VoiceAssistant from "@/components/voice/VoiceAssistant";
+import VapiAssistant from "@/components/voice/vapiAssistant";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +32,8 @@ export default function RootLayout({
         <Header />
         <main>{children}</main>
         
-        <VoiceAssistant />
+        {/* <VoiceAssistant />*/}
+        <VapiAssistant/>
         <Footer />
       </body>
     </html>

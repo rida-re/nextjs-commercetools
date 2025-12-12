@@ -3,14 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/store/cartStore";
+import { Product, ProductProjection } from "@commercetools/platform-sdk";
 
-// Types
-interface Product {
-  id: string;
-  name: string;
-  sku: string;
-  price: number;
-}
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -120,7 +114,7 @@ export default function VoiceAssistant() {
   };
 
   // Fetch available products from API
-  const fetchProducts = async (): Promise<Product[]> => {
+  const fetchProducts = async (): Promise<ProductProjection[]> => {
     try {
       const res = await fetch("/api/products");
       if (!res.ok) throw new Error("Failed to fetch products");
@@ -260,8 +254,8 @@ export default function VoiceAssistant() {
             return;
           }
 
-          const products = await fetchProducts();
-          const productNames = products.map(p => p.name);
+          const products : ProductProjection[] = await fetchProducts();
+          const productNames = products.map(p => p.name?.['en-GB']);
           const matchedName = findBestMatch(product, productNames, 0.5);
           
           if (!matchedName) {
@@ -269,7 +263,7 @@ export default function VoiceAssistant() {
             return;
           }
 
-          const matchedProduct = products.find(p => p.name === matchedName);
+          const matchedProduct = products.find(p => p.name?.['en-GB'] === matchedName);
           if (!matchedProduct || !cart) {
             await speak("Sorry, I encountered an error. Please try again.");
             return;
