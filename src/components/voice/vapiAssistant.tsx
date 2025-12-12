@@ -291,7 +291,7 @@ export default function VapiAssistant() {
           provider: "openai",
           voiceId: "alloy",
         },
-        firstMessage: "Hello! I'm your shopping assistant. I can help you navigate the store. Try saying 'go to cart', 'show products', 'search for shoes', or 'go home'.",
+        firstMessage: "Hello! I'm your shopping assistant. You can ask me to go home, go to cart, show products, or search for products. Use the tool functions provided to navigate.",
       });
       console.log("✅ Assistant started successfully");
       setStatus("Listening...");
