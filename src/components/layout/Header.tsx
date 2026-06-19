@@ -20,7 +20,7 @@ export default function Header() {
 
   const cartItemsCount =
     mounted && cart
-      ? cart.lineItems.reduce((sum, item) => sum + item.quantity, 0)
+      ? cart.lineItems?.reduce((sum, item) => sum + item.quantity, 0)
       : 0;
 
   const handleSearch = () => {

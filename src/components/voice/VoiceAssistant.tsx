@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/store/cartStore";
-import { Product, ProductProjection } from "@commercetools/platform-sdk";
-
+import { ProductProjection } from "@commercetools/platform-sdk";
+import { useTextToSpeech } from "@/hooks/useTextToSpeech";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { parseCommand } from "@/utils/voiceCommandParser";
+import { findBestMatch } from "@/utils/fuzzyMatcher";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -15,106 +18,35 @@ interface ConversationMessage {
 export default function VoiceAssistant() {
   const [isListening, setIsListening] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<string>("");
+  const [lastResponse, setLastResponse] = useState<string>("");
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
-  
-  const recognitionRef = useRef<any>(null);
-  const audioQueueRef = useRef<string[]>([]);
-  const isProcessingAudioRef = useRef(false);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [language, setLanguage] = useState<string>('en');
   
   const { cart, setCart } = useCartStore();
   const router = useRouter();
+  const handleCommandRef = useRef<(command: string) => Promise<void>>();
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-      }
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Enhanced TTS with queue management
-  const speak = useCallback(async (text: string) => {
-    if (isMuted) return;
-
-    audioQueueRef.current.push(text);
-    
-    if (!isProcessingAudioRef.current) {
-      await processAudioQueue();
-    }
-  }, [isMuted]);
-
-  const processAudioQueue = async () => {
-    if (audioQueueRef.current.length === 0) {
-      isProcessingAudioRef.current = false;
-      setIsSpeaking(false);
-      return;
-    }
-
-    isProcessingAudioRef.current = true;
-    setIsSpeaking(true);
-    const text = audioQueueRef.current.shift()!;
-
-    try {
-      const res = await fetch("/api/murf/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!res.ok) {
-        throw new Error("TTS request failed");
-      }
-
-      const data = await res.json();
-      if (!data?.audioUrl) {
-        console.error("No audio returned from TTS", data);
-        await processAudioQueue();
-        return;
-      }
-
-      const audio = new Audio(data.audioUrl);
-      currentAudioRef.current = audio;
-      
-      await audio.play();
-      await new Promise((resolve) => {
-        audio.onended = resolve;
-        audio.onerror = resolve;
-      });
-
-      // Add to conversation history
-      addToHistory("assistant", text);
-      
-      // Process next in queue
-      await processAudioQueue();
-    } catch (err) {
-      console.error("TTS error:", err);
-      setError("Speech synthesis failed");
-      await processAudioQueue();
-    }
-  };
+  const { speak, stop: stopSpeaking, isPlaying } = useTextToSpeech({
+    onSpeakStart: () => {},
+    onSpeakEnd: () => {},
+    onError: setError,
+  });
 
   // Add message to conversation history
-  const addToHistory = (role: "user" | "assistant", content: string) => {
+  const addToHistory = useCallback((role: "user" | "assistant", content: string) => {
     setConversationHistory(prev => [
       ...prev.slice(-10), // Keep last 10 messages
       { role, content, timestamp: Date.now() }
     ]);
-  };
+    if (role === "assistant") {
+      setLastResponse(content);
+    }
+  }, []);
 
   // Fetch available products from API
-  const fetchProducts = async (): Promise<ProductProjection[]> => {
+  const fetchProducts = useCallback(async (): Promise<ProductProjection[]> => {
     try {
       const res = await fetch("/api/products");
       if (!res.ok) throw new Error("Failed to fetch products");
@@ -124,128 +56,147 @@ export default function VoiceAssistant() {
       console.error("Product fetch error:", err);
       return [];
     }
-  };
+  }, []);
 
-  // Enhanced fuzzy matching with phonetic similarity
-  const calculateSimilarity = (str1: string, str2: string): number => {
-  const s1 = String(str1 || '').toLowerCase().trim();
-  const s2 = String(str2 || '').toLowerCase().trim();
-    
-    // Exact match
-    if (s1 === s2) return 1.0;
-    
-    // Contains match
-    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
-    
-    // Levenshtein distance
-    const len1 = s1.length;
-    const len2 = s2.length;
-    const matrix: number[][] = Array(len1 + 1).fill(null)
-      .map(() => Array(len2 + 1).fill(0));
-
-    for (let i = 0; i <= len1; i++) matrix[i][0] = i;
-    for (let j = 0; j <= len2; j++) matrix[0][j] = j;
-
-    for (let i = 1; i <= len1; i++) {
-      for (let j = 1; j <= len2; j++) {
-        const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost
-        );
+  // Order operations
+  const createOrder = useCallback(async () => {
+    try {
+      if (!cart || !cart.lineItems || cart.lineItems.length === 0) {
+        const errorMsg = "Your cart is empty. Add items before creating an order";
+        addToHistory("assistant", errorMsg);
+        if (!isMuted) await speak(errorMsg);
+        return;
       }
-    }
 
-    const distance = matrix[len1][len2];
-    const maxLen = Math.max(len1, len2);
-    return 1 - (distance / maxLen);
-  };
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          cartId: cart.id,
+          cartVersion: cart.version,
+        }),
+      });
 
-  const findBestMatch = (
-    spokenWord: string, 
-    candidates: string[], 
-    threshold: number = 0.6
-  ): string | null => {
-    let bestMatch = null;
-    let bestScore = 0;
-    
-    for (const candidate of candidates) {
-      const score = calculateSimilarity(spokenWord, candidate);
-      if (score > bestScore && score >= threshold) {
-        bestScore = score;
-        bestMatch = candidate;
+      if (!res.ok) {
+        const errorMsg = "Failed to create order";
+        addToHistory("assistant", errorMsg);
+        if (!isMuted) await speak(errorMsg);
+        return;
       }
+
+      const order = await res.json();
+      
+      // Clear cart after successful order creation
+      const clearRes = await fetch("/api/cart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove",
+          cartId: cart.id,
+          version: cart.version,
+          lineItemId: cart.lineItems[0].id,
+        }),
+      });
+
+      const successMsg = `Order created successfully! Order ID: ${order.id}`;
+      addToHistory("assistant", successMsg);
+      if (!isMuted) await speak(successMsg);
+    } catch (error) {
+      console.error("Error creating order:", error);
+      const errorMsg = "Error creating order";
+      addToHistory("assistant", errorMsg);
+      if (!isMuted) await speak(errorMsg);
     }
-    
-    return bestMatch;
-  };
+  }, [cart, isMuted, addToHistory, speak]);
 
-  // Enhanced command parsing with NLP-like patterns
-  const parseCommand = (command: string) => {
-    const lowerCmd = command.toLowerCase().trim();
-    
-    // Quantity extraction
-    const quantityMatch = lowerCmd.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)/);
-    const quantityMap: Record<string, number> = {
-      one: 1, two: 2, three: 3, four: 4, five: 5,
-      six: 6, seven: 7, eight: 8, nine: 9, ten: 10
-    };
-    const quantity = quantityMatch 
-      ? (quantityMap[quantityMatch[1]] || parseInt(quantityMatch[1]) || 1)
-      : 1;
-
-    // Product extraction (improved patterns)
-    const productPatterns = [
-      /(?:add|buy|purchase|get|order)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?(?:\d+\s+)?(.+?)(?:\s+to|\s+in|\s+please|$)/i,
-      /(?:looking\s+for|want|need|show\s+me)\s+(?:a\s+|an\s+|some\s+)?(.+?)(?:\s+please|$)/i,
-      /(?:remove|delete|take\s+out)\s+(?:the\s+)?(.+?)(?:\s+from|$)/i,
-    ];
-    
-    let product = null;
-    for (const pattern of productPatterns) {
-      const match = lowerCmd.match(pattern);
-      if (match && match[1]) {
-        product = match[1].trim()
-          .replace(/\b(please|thanks|thank you|to cart|from cart)\b/gi, '')
-          .trim();
-        break;
+  const checkOrderStatus = useCallback(async (orderId?: string) => {
+    try {
+      if (!orderId) {
+        const errorMsg = "Please provide an order ID to check status";
+        addToHistory("assistant", errorMsg);
+        if (!isMuted) await speak(errorMsg);
+        return;
       }
-    }
 
-    // Intent detection with confidence
-    const intents = {
-      add_to_cart: /(add|put|place|insert|buy|purchase|get|order|want|need).*(?:cart|basket|bag)/i,
-      remove_from_cart: /(remove|delete|take out|clear|drop).*(?:cart|basket|bag)/i,
-      view_cart: /(show|display|view|open|check|what's in).*(?:cart|basket|bag)/i,
-      checkout: /(checkout|pay|purchase|buy now|complete order|proceed)/i,
-      search_products: /(search|find|look for|show me|browse|what do you have).*(?:product|item)/i,
-      navigate_home: /(home|main page|start|beginning)/i,
-      navigate_products: /(products|shop|store|catalog|browse)/i,
-      clear_cart: /(clear|empty|remove all|delete all).*(?:cart|basket)/i,
-      help: /(help|what can you do|commands|options)/i,
-      repeat: /(repeat|say again|what|pardon)/i,
-      cancel: /(cancel|stop|never mind|forget it)/i,
-    };
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "get",
+          orderId,
+        }),
+      });
 
-    let detectedIntent = "unknown";
-    for (const [intent, pattern] of Object.entries(intents)) {
-      if (pattern.test(lowerCmd)) {
-        detectedIntent = intent;
-        break;
+      if (!res.ok) {
+        const errorMsg = "Failed to fetch order status";
+        addToHistory("assistant", errorMsg);
+        if (!isMuted) await speak(errorMsg);
+        return;
       }
-    }
 
-    return { intent: detectedIntent, product, quantity };
-  };
+      const order = await res.json();
+      const status = order.orderState || "Unknown";
+      const total = order.totalPrice?.centAmount ? (order.totalPrice.centAmount / 100).toFixed(2) : "0.00";
+
+      const statusMsg = `Order ${orderId} status: ${status}. Total: €${total}`;
+      addToHistory("assistant", statusMsg);
+      if (!isMuted) await speak(statusMsg);
+    } catch (error) {
+      console.error("Error checking order status:", error);
+      const errorMsg = "Error checking order status";
+      addToHistory("assistant", errorMsg);
+      if (!isMuted) await speak(errorMsg);
+    }
+  }, [isMuted, addToHistory, speak]);
+
+  const clearCart = useCallback(async () => {
+    try {
+      if (!cart || !cart.lineItems || cart.lineItems.length === 0) {
+        const errorMsg = "Your cart is already empty";
+        addToHistory("assistant", errorMsg);
+        if (!isMuted) await speak(errorMsg);
+        return;
+      }
+
+      // Remove all items one by one
+      let updatedCart = cart;
+      for (const item of cart.lineItems) {
+        const removeRes = await fetch("/api/cart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "remove",
+            cartId: updatedCart.id,
+            version: updatedCart.version,
+            lineItemId: item.id,
+          }),
+        });
+
+        if (removeRes.ok) {
+          updatedCart = await removeRes.json();
+        }
+      }
+
+      setCart(updatedCart);
+      const successMsg = "Cleared all items from your cart";
+      addToHistory("assistant", successMsg);
+      if (!isMuted) await speak(successMsg);
+    } catch (error) {
+      console.error("Error clearing cart:", error);
+      const errorMsg = "Error clearing cart";
+      addToHistory("assistant", errorMsg);
+      if (!isMuted) await speak(errorMsg);
+    }
+  }, [cart, setCart, isMuted, addToHistory, speak]);
 
   // Main command handler
-  const handleCommand = async (command: string) => {
+  const handleCommand = useCallback(async (command: string) => {
     try {
       setLastCommand(command);
       addToHistory("user", command);
 
-      const { intent, product, quantity } = parseCommand(command);
+      const { intent, product, quantity } = parseCommand(command, language);
       
       switch (intent) {
         case "add_to_cart": {
@@ -255,7 +206,7 @@ export default function VoiceAssistant() {
           }
 
           const products : ProductProjection[] = await fetchProducts();
-          const productNames = products.map(p => p.name?.['en-GB']);
+          const productNames = products.map(p => p.name?.['en-GB'] || p.name?.['en-US'] || '').filter(Boolean);
           const matchedName = findBestMatch(product, productNames, 0.5);
           
           if (!matchedName) {
@@ -292,19 +243,20 @@ export default function VoiceAssistant() {
           const confirmMsg = quantity > 1
             ? `Added ${quantity} ${matchedName}s to your cart`
             : `Added ${matchedName} to your cart`;
-          await speak(confirmMsg);
+          addToHistory("assistant", confirmMsg);
+          if (!isMuted) await speak(confirmMsg);
           break;
         }
 
         case "remove_from_cart": {
           if (!cart || cart.lineItems.length === 0) {
-            await speak("Your cart is empty");
+            if (!isMuted) await speak("Your cart is empty");
             return;
           }
 
           if (!product) {
             const items = cart.lineItems.map((item: any) => item.name).join(", ");
-            await speak(`Your cart contains: ${items}. Which item would you like to remove?`);
+            if (!isMuted) await speak(`Your cart contains: ${items}. Which item would you like to remove?`);
             return;
           }
 
@@ -312,13 +264,13 @@ export default function VoiceAssistant() {
           const matchedName = findBestMatch(product, cartItemNames, 0.5);
           
           if (!matchedName) {
-            await speak(`I couldn't find ${product} in your cart`);
+            if (!isMuted) await speak(`I couldn't find ${product} in your cart`);
             return;
           }
 
           const lineItem = cart.lineItems.find((item: any) => item.name === matchedName);
           if (!lineItem) {
-            await speak("Sorry, something went wrong");
+            if (!isMuted) await speak("Sorry, something went wrong");
             return;
           }
 
@@ -334,73 +286,75 @@ export default function VoiceAssistant() {
           });
           
           if (!res.ok) {
-            await speak("I couldn't remove that item");
+            if (!isMuted) await speak("I couldn't remove that item");
             return;
           }
           
           const updatedCart = await res.json();
           setCart(updatedCart);
-          await speak(`Removed ${matchedName} from your cart`);
+          const removeMsg = `Removed ${matchedName} from your cart`;
+          addToHistory("assistant", removeMsg);
+          if (!isMuted) await speak(removeMsg);
           break;
         }
 
         case "view_cart": {
           if (!cart || cart.lineItems.length === 0) {
-            await speak("Your cart is currently empty");
+            if (!isMuted) await speak("Your cart is currently empty");
             return;
           }
 
-          const itemCount = cart.lineItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+          const itemCount = cart.lineItems?.reduce((sum: number, item: any) => sum + item.quantity, 0);
           const items = cart.lineItems
             .map((item: any) => `${item.quantity} ${item.name}`)
             .join(", ");
           
-          await speak(`You have ${itemCount} items in your cart: ${items}`);
+          const cartMsg = `You have ${itemCount} items in your cart: ${items}`;
+          addToHistory("assistant", cartMsg);
+          if (!isMuted) await speak(cartMsg);
           router.push("/cart");
           break;
         }
 
         case "checkout": {
           if (!cart || cart.lineItems.length === 0) {
-            await speak("Your cart is empty. Add some products before checking out");
+            if (!isMuted) await speak("Your cart is empty. Add some products before checking out");
             return;
           }
           
-          await speak("Taking you to checkout");
+          const checkoutMsg = "Taking you to checkout";
+          addToHistory("assistant", checkoutMsg);
+          if (!isMuted) await speak(checkoutMsg);
           router.push("/checkout");
           break;
         }
 
         case "search_products":
         case "navigate_products": {
-          await speak("Here are our products. You can ask me to add any of them to your cart");
+          const productsMsg = "Here are our products. You can ask me to add any of them to your cart";
+          addToHistory("assistant", productsMsg);
+          if (!isMuted) await speak(productsMsg);
           router.push("/products");
           break;
         }
 
         case "navigate_home": {
-          await speak("Taking you to the home page");
+          const homeMsg = "Taking you to the home page";
+          addToHistory("assistant", homeMsg);
+          if (!isMuted) await speak(homeMsg);
           router.push("/");
           break;
         }
 
         case "clear_cart": {
-          if (!cart || cart.lineItems.length === 0) {
-            await speak("Your cart is already empty");
-            return;
-          }
-
-          // Clear all items
-          await speak("Clearing your cart");
-          // Implement bulk clear API call
+          await clearCart();
           break;
         }
 
         case "help": {
-          await speak(
-            "I can help you shop! Try saying: add product to cart, show my cart, " +
-            "remove item from cart, go to checkout, or show me products"
-          );
+          const helpMsg = "I can help you shop! Try saying: add product to cart, show my cart, remove item from cart, go to checkout, or show me products";
+          addToHistory("assistant", helpMsg);
+          if (!isMuted) await speak(helpMsg);
           break;
         }
 
@@ -409,7 +363,8 @@ export default function VoiceAssistant() {
             const lastAssistantMsg = [...conversationHistory]
               .reverse()
               .find(msg => msg.role === "assistant");
-            if (lastAssistantMsg) {
+            if (lastAssistantMsg && !isMuted) {
+              addToHistory("assistant", lastAssistantMsg.content);
               await speak(lastAssistantMsg.content);
             }
           }
@@ -417,125 +372,111 @@ export default function VoiceAssistant() {
         }
 
         case "cancel": {
-          await speak("Okay, cancelled");
+          const cancelMsg = "Okay, cancelled";
+          addToHistory("assistant", cancelMsg);
+          if (!isMuted) await speak(cancelMsg);
+          break;
+        }
+
+        case "create_order": {
+          await createOrder();
+          break;
+        }
+
+        case "check_order_status": {
+          // Extract order ID from command (simple pattern matching)
+          const orderIdMatch = command.match(/order\s+([a-zA-Z0-9-]+)/i);
+          const orderId = orderIdMatch ? orderIdMatch[1] : undefined;
+          await checkOrderStatus(orderId);
           break;
         }
 
         default: {
-          await speak(
-            "I'm not sure what you mean. Try saying: add product, show cart, " +
-            "or say help for more options"
-          );
+          const unknownMsg = "I'm not sure what you mean. Try saying: add product, show cart, or say help for more options";
+          addToHistory("assistant", unknownMsg);
+          if (!isMuted) await speak(unknownMsg);
           break;
         }
       }
     } catch (err) {
       console.error("Command error:", err);
       setError("Command processing failed");
-      await speak("Sorry, something went wrong. Please try again");
+      if (!isMuted) await speak("Sorry, something went wrong. Please try again");
     }
-  };
+  }, [isMuted, cart, router, fetchProducts, addToHistory, speak, createOrder, checkOrderStatus, clearCart, language]);
 
-  // Enhanced speech recognition with noise handling
-  const startListening = () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in your browser");
-      return;
-    }
+  // Update ref whenever handleCommand changes
+  handleCommandRef.current = handleCommand;
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 3;
+  const { startListening: startSpeechRecognition, stopListening: stopSpeechRecognition } = useSpeechRecognition({
+    onResult: (command: string) => handleCommandRef.current?.(command),
+    onError: setError,
+    onSpeechStart: () => {},
+    onSpeechEnd: () => {},
+    silenceTimeout: 1500,
+    language: language === 'de' ? 'de-DE' : language === 'fr' ? 'fr-FR' : language === 'es' ? 'es-ES' : 'en-US',
+  });
 
-    let finalTranscript = "";
-    let interimTranscript = "";
-
-    recognition.onresult = (event: any) => {
-      interimTranscript = "";
-      
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript + " ";
-          
-          // Reset silence timer
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-          }
-          
-          // Process command after 1.5 seconds of silence
-          silenceTimerRef.current = setTimeout(() => {
-            if (finalTranscript.trim()) {
-              console.log("Processing:", finalTranscript.trim());
-              handleCommand(finalTranscript.trim());
-              finalTranscript = "";
-            }
-          }, 1500);
-        } else {
-          interimTranscript += transcript;
-        }
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error);
-      
-      if (event.error === "no-speech") {
-        // Ignore no-speech errors in continuous mode
-        return;
-      }
-      
-      setError(`Recognition error: ${event.error}`);
-      
-      if (event.error === "not-allowed") {
-        stopListening();
-      }
-    };
-
-    recognition.onend = () => {
-      if (isListening) {
-        // Auto-restart if still supposed to be listening
-        recognition.start();
-      }
-    };
-
-    recognition.start();
-    recognitionRef.current = recognition;
+  const startListening = useCallback(() => {
+    startSpeechRecognition();
     setIsListening(true);
-    setError(null);
-  };
+  }, [startSpeechRecognition]);
 
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-    }
+  const stopListening = useCallback(() => {
+    stopSpeechRecognition();
     setIsListening(false);
-  };
+  }, [stopSpeechRecognition]);
 
-  const startConversation = async () => {
-    await speak("Hello! I'm your shopping assistant. How can I help you today?");
+  const startConversation = useCallback(async () => {
+    const greeting = "Hello! I'm your shopping assistant. How can I help you today?";
+    addToHistory("assistant", greeting);
+    if (!isMuted) await speak(greeting);
     startListening();
-  };
+    setIsListening(true);
+  }, [isMuted, speak, startListening, addToHistory]);
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     setIsMuted(prev => !prev);
-    if (currentAudioRef.current && !isMuted) {
-      currentAudioRef.current.pause();
+    if (isPlaying && !isMuted) {
+      stopSpeaking();
     }
-  };
+  }, [isPlaying, isMuted, stopSpeaking]);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div className="fixed bottom-6 right-6 flex flex-col items-end gap-3 z-50">
+      {isListening && (
+        <>
+          {lastResponse && (
+            <div className="bg-white p-4 rounded-lg shadow-lg text-sm text-gray-700 border border-gray-200 max-w-md">
+              <div className="flex items-start gap-2">
+                <span className="text-lg">🤖</span>
+                <p className="flex-1">{lastResponse}</p>
+              </div>
+            </div>
+          )}
+
+          {conversationHistory.length > 0 && (
+            <div className="bg-white p-4 rounded-lg shadow-lg border border-gray-200 max-w-md max-h-64 overflow-y-auto">
+              <h4 className="text-xs font-semibold text-gray-500 mb-2">Conversation History</h4>
+              <div className="space-y-2">
+                {conversationHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex items-start gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                    <span className="text-sm">{msg.role === 'user' ? '👤' : '🤖'}</span>
+                    <div className={`flex-1 p-2 rounded-lg text-sm ${
+                      msg.role === 'user' 
+                        ? 'bg-blue-50 text-blue-900' 
+                        : 'bg-gray-50 text-gray-900'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {!isListening ? (
         <button
           onClick={startConversation}
@@ -548,9 +489,9 @@ export default function VoiceAssistant() {
         <div className="bg-white shadow-2xl rounded-2xl p-5 w-80 border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${isSpeaking ? 'bg-blue-500' : 'bg-red-500'} animate-pulse`}></div>
+              <div className={`w-3 h-3 rounded-full ${isPlaying ? 'bg-blue-500' : 'bg-red-500'} animate-pulse`}></div>
               <span className="text-sm font-semibold text-gray-700">
-                {isSpeaking ? "🔊 Speaking..." : isMuted ? "🔇 Listening (Muted)" : "🎤 Listening..."}
+                {isPlaying ? "🔊 Speaking..." : isMuted ? "🔇 Listening (Muted)" : "🎤 Listening..."}
               </span>
             </div>
           </div>
@@ -582,6 +523,26 @@ export default function VoiceAssistant() {
               <p className="text-red-700 text-xs font-medium">{error}</p>
             </div>
           )}
+          
+          {cart && cart.lineItems && cart.lineItems.length > 0 && (
+            <div className="mt-3 p-2 bg-blue-50 rounded-lg text-xs text-blue-900">
+              🛒 {cart.lineItems.length} items in cart
+            </div>
+          )}
+          
+          <div className="mt-3">
+            <label className="text-xs text-gray-500 mb-1 block">Language:</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full text-xs border border-gray-200 rounded px-2 py-1"
+            >
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
           
           <div className="text-xs text-gray-500 text-center mt-3">
             Try: "Add headphones to cart" or "Show my cart"

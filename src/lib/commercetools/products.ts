@@ -77,3 +77,32 @@ export async function searchProducts(searchTerm: string, locale = "en") {
     throw new Error(`Error searching products: ${errorMessage}`);
   }
 }
+
+export async function getProductsByCategory(
+  categoryId: string,
+  params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string[];
+  }
+) {
+  try {
+    const response = await apiRoot
+      .productProjections()
+      .search()
+      .get({
+        queryArgs: {
+          filter: [`categories.id:"${categoryId}"`],
+          limit: params?.limit || 20,
+          offset: params?.offset || 0,
+          sort: params?.sort,
+        },
+      })
+      .execute();
+
+    return response.body.results;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    throw new Error(`Error fetching products by category: ${errorMessage}`);
+  }
+}
